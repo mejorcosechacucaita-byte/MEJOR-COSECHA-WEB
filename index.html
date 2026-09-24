@@ -140,6 +140,9 @@ textarea{font:inherit;font-size:.8rem;width:100%;min-height:160px;border:1px sol
 .rev .r1{display:grid;grid-template-columns:auto 1fr;gap:.5rem;align-items:center}
 .rev .r2{display:grid;grid-template-columns:1fr 1fr;gap:.4rem}
 .rev .r3{display:grid;grid-template-columns:1.2fr 1fr .7fr;gap:.4rem}
+.fila{display:grid;grid-template-columns:2.4fr .8fr .9fr 1.1fr .8fr .7fr;gap:.35rem;padding:.2rem 0}
+.fila input,.fila select{padding:.35rem .4rem;font-size:.9rem}
+@media (max-width:640px){.fila{grid-template-columns:1fr 1fr;}}
 .rev input,.rev select{padding:.35rem .45rem;font-size:.9rem}
 .rev.falta{background:var(--orange-soft);border-radius:8px;padding:.6rem;border-top:0}
 .revbox{max-height:52vh;overflow:auto}
@@ -174,6 +177,9 @@ textarea{font:inherit;font-size:.8rem;width:100%;min-height:160px;border:1px sol
   </div>
 
   <div id="photoWrap" style="margin-bottom:.75rem">
+    <button class="btn ghost" id="rapidoBtn">Digitar factura rápido</button>
+    <button class="btn ghost" id="ocrBtn">Leer factura con Google</button>
+    <input type="file" id="ocrInput" accept="image/*" hidden>
     <button class="btn ghost" id="photoBtn">Adjuntar factura (foto o PDF)</button>
     <span class="status" id="photoStatus"></span>
     <input type="file" id="photoInput" accept="image/*,application/pdf,.pdf" multiple hidden>
@@ -261,6 +267,27 @@ textarea{font:inherit;font-size:.8rem;width:100%;min-height:160px;border:1px sol
     <div class="btns">
       <button type="button" class="btn ghost" id="revCancel">Cancelar</button>
       <button type="button" class="btn" id="revSave">Agregar seleccionados</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgRapido">
+  <form class="sheet" method="dialog" style="width:min(840px,96vw)">
+    <h2>Digitar factura</h2>
+    <p class="hint">Escribe un renglón por producto. Con Enter pasas al siguiente campo y, al final de la fila, se crea otra.</p>
+    <div class="row2">
+      <label>Proveedor<input id="rProv" list="dlProveedores" autocomplete="off"></label>
+      <label>Factura o remisión<input id="rDoc" autocomplete="off"></label>
+    </div>
+    <div class="row2">
+      <label>Fecha de ingreso<input id="rIngreso" type="date"></label>
+      <label>Ubicación en bodega<input id="rUbic" autocomplete="off" placeholder="opcional"></label>
+    </div>
+    <div class="revbox" id="rapidoBox"></div>
+    <button type="button" class="icon" id="rMas">Agregar otro renglón</button>
+    <div class="btns">
+      <button type="button" class="btn ghost" id="rCancel">Cancelar</button>
+      <button type="button" class="btn" id="rSave">Guardar todo</button>
     </div>
   </form>
 </dialog>
@@ -890,6 +917,108 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyUtuqHwkc0W64NY9_kqT_-
       alert("No pude conectar con esa URL. Revisa que al implementarla hayas puesto acceso para 'Cualquier persona'.");
     }
   };
+
+  // ---------- digitar factura rapido ----------
+  const UNIDADES=["und","cajas","bultos","kg","lt"];
+  function mesOptions(sel){return MESES.map((m,i)=>`<option value="${i+1}"${sel===i+1?" selected":""}>${m.slice(0,3)}</option>`).join("");}
+  function filaRapida(){
+    const div=document.createElement("div");
+    div.className="fila";
+    div.innerHTML=`<input class="p" list="dlProductos" placeholder="Producto" autocomplete="off">
+      <input class="c" type="number" min="0" placeholder="Cant." inputmode="numeric">
+      <select class="u">${UNIDADES.map(u=>`<option>${u}</option>`).join("")}</select>
+      <select class="m"><option value="">Mes</option>${mesOptions(0)}</select>
+      <input class="y" type="number" placeholder="Año" inputmode="numeric">
+      <input class="d" type="number" placeholder="Día" inputmode="numeric">`;
+    return div;
+  }
+  function nuevaFila(foco){
+    const f=filaRapida();
+    $("rapidoBox").appendChild(f);
+    if(foco)f.querySelector(".p").focus();
+    return f;
+  }
+  $("rapidoBtn").onclick=()=>{
+    $("rapidoBox").innerHTML="";
+    for(let i=0;i<6;i++)nuevaFila(false);
+    $("rIngreso").value=iso(today());
+    $("dlgRapido").showModal();
+    $("rProv").focus();
+  };
+  $("rMas").onclick=()=>nuevaFila(true);
+  $("rCancel").onclick=()=>$("dlgRapido").close();
+  $("rapidoBox").addEventListener("keydown",e=>{
+    if(e.key!=="Enter")return;
+    e.preventDefault();
+    const campos=[...$("rapidoBox").querySelectorAll("input,select")];
+    const i=campos.indexOf(e.target);
+    if(i<0)return;
+    if(i===campos.length-1){const f=nuevaFila(true);return;}
+    campos[i+1].focus();
+  });
+  $("rSave").onclick=async()=>{
+    const prov=$("rProv").value.trim(),doc=$("rDoc").value.trim(),ing=$("rIngreso").value,ubic=$("rUbic").value.trim();
+    const filas=[...$("rapidoBox").querySelectorAll(".fila")];
+    let n=0,sinFecha=0;
+    for(const f of filas){
+      const nombre=f.querySelector(".p").value.trim(); if(!nombre)continue;
+      const cant=Number(f.querySelector(".c").value)||0;
+      const mes=+f.querySelector(".m").value,anio=+f.querySelector(".y").value,dia=+f.querySelector(".d").value;
+      let vence="";
+      if(mes&&anio){const last=new Date(anio,mes,0).getDate();
+        vence=anio+"-"+String(mes).padStart(2,"0")+"-"+String(dia?Math.min(dia,last):last).padStart(2,"0");}
+      else sinFecha++;
+      const ex=items.find(x=>key(x.nombre)===key(nombre));
+      await upsert({id:newId(),nombre:ex?ex.nombre:nombre,proveedor:prov,ingreso:ing,documento:doc,
+        cantidad:cant,unidad:f.querySelector(".u").value,vence,nota:"",revisar:!vence,precio:0,ubicacion:ubic});
+      n++;
+    }
+    $("dlgRapido").close();page=1;render();
+    alert(n?("Guarde "+n+" renglones."+(sinFecha?" "+sinFecha+" quedaron sin fecha, marcados como revisar.":"")):"No habia renglones con producto.");
+  };
+
+  // ---------- leer factura con Google (OCR de Drive) ----------
+  if(!api)$("ocrBtn").style.display="none";
+  $("ocrBtn").onclick=()=>{
+    if(!api){alert("Primero conecta la app con tu hoja de Google.");return;}
+    $("ocrInput").click();
+  };
+  $("ocrInput").onchange=async()=>{
+    const f=$("ocrInput").files[0]; if(!f)return;
+    if(f.size>6000000){alert("La foto es muy pesada. Toma una mas liviana o reducela.");$("ocrInput").value="";return;}
+    $("ocrBtn").disabled=true;const txt0=$("ocrBtn").textContent;$("ocrBtn").textContent="Leyendo con Google...";
+    try{
+      const b64=await new Promise((res,rej)=>{const r=new FileReader();
+        r.onload=()=>res(String(r.result).split(",")[1]);r.onerror=rej;r.readAsDataURL(f);});
+      const j=await apiCall({accion:"ocr",nombre:f.name||"factura.jpg",mime:f.type||"image/jpeg",datos:b64});
+      const lotes=renglonesDeTexto(j.texto||"");
+      if(!lotes.length)alert("Google no reconocio renglones en esa foto. Prueba con mas luz o usa Digitar factura rapido.");
+      else openReview(lotes,"","");
+    }catch(e){
+      alert("No pude leer la foto con Google: "+((e&&e.message)||"error")+
+        ". Revisa que en Apps Script hayas activado el servicio Drive API y vuelto a implementar.");
+    }
+    $("ocrBtn").disabled=false;$("ocrBtn").textContent=txt0;$("ocrInput").value="";
+  };
+
+  /* De un texto suelto saca renglones con producto y cantidad.
+     Las fechas manuscritas casi nunca las lee, por eso quedan para digitar. */
+  function renglonesDeTexto(texto){
+    const malas=/(total|subtotal|iva|retefte|factura|cliente|nit|direccion|ciudad|correo|telefono|vendedor|codigo|descripcion|unid|cant|valor|firma|observaciones|pago|banco)/i;
+    const out=[];
+    texto.split("\n").forEach(linea=>{
+      const l=linea.replace(/\s+/g," ").trim();
+      if(l.length<6||malas.test(l))return;
+      const nums=l.match(/\b\d{1,4}\b/g);
+      if(!nums)return;
+      const nombre=l.replace(/[\d.,$]+\s*$/,"").replace(/\s+\d{1,4}\s*$/,"").trim();
+      if(nombre.length<4||!/[a-zA-Z]{3}/.test(nombre))return;
+      const cant=Number(nums[nums.length-1])||0;
+      out.push({nombre:nombre.slice(0,70),cantidad:cant>0&&cant<10000?cant:0,unidad:"und",
+        anio:0,mes:0,dia:null,nota:"Escribe la fecha de vencimiento",revisar:true});
+    });
+    return out.slice(0,60);
+  }
 
   // ---------- salidas (descuenta del lote que vence primero) ----------
   function abrirSalida(nombre){
