@@ -160,7 +160,6 @@ textarea{font:inherit;font-size:.8rem;width:100%;min-height:160px;border:1px sol
   </header>
 
   <div id="alert"></div>
-  <p class="sub" id="plata" style="margin:0 0 .75rem"></p>
 
   <div class="strip" role="group" aria-label="Filtrar por estado">
     <button class="stat red" data-f="red" aria-pressed="false"><b id="cRed">0</b><span>Lotes vencidos o ≤ 30 días</span></button>
@@ -476,12 +475,6 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyUtuqHwkc0W64NY9_kqT_-
     $("dlProductos").innerHTML=prods.map(p=>`<option value="${esc(p)}">`).join("");
     $("dlProveedores").innerHTML=provs.map(p=>`<option value="${esc(p)}">`).join("");
 
-    let vr=0,vn=0;
-    items.forEach(it=>{const g2=group(status(it)),v=(Number(it.precio)||0)*(Number(it.cantidad)||0);
-      if(g2==="red")vr+=v; else if(g2==="orange")vn+=v;});
-    $("plata").textContent=(vr||vn)?("Valor en riesgo: "+plata(vr)+" en rojo y "+plata(vn)+" en naranja."):
-      "Agrega el precio unitario en cada lote y aquí te muestro cuánta plata está en riesgo.";
-
     const provs2=[...new Map(items.filter(it=>it.proveedor).map(it=>[key(it.proveedor),it.proveedor])).values()].sort();
     const docs2=[...new Map(items.filter(it=>it.documento).map(it=>[key(it.documento),it.documento])).values()].sort();
     $("fProvFiltro").innerHTML='<option value="">Todos los proveedores</option>'+provs2.map(p=>`<option value="${esc(key(p))}"${fProv===key(p)?" selected":""}>${esc(p)}</option>`).join("");
@@ -686,8 +679,13 @@ const API_URL = "https://script.google.com/macros/s/AKfycbyUtuqHwkc0W64NY9_kqT_-
       $("photoStatus").textContent="";
     }).catch(()=>{});
   }
+  // si a los 3 segundos no hay lector (p. ej. en GitHub), se cambia el boton por un aviso discreto
+  setTimeout(()=>{
+    if(sampler)return;
+    $("photoWrap").innerHTML='<span class="status">Para leer facturas en foto o PDF, abre esta misma bodega en la app de Claude.</span>';
+  },3000);
   $("photoBtn").onclick=()=>{
-    if(!sampler){alert("La lectura por foto solo funciona en la app de Claude y necesita unos segundos despues de abrir la pagina. Si acabas de abrirla, espera un momento y vuelve a tocar el boton. En la version de GitHub no esta disponible: en ese caso mandame la foto por el chat.");return;}
+    if(!sampler){$("photoStatus").textContent="Esta función solo está disponible en la app de Claude.";return;}
     $("photoInput").click();
   };
   async function pdfAImagenes(file,max){
